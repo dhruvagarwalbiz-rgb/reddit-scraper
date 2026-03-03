@@ -117,7 +117,7 @@ async function fetchReddit(url, signal) {
 
 async function fetchPostComments(subreddit, postId, signal) {
   try {
-    const data = await fetchReddit(`https://www.reddit.com/r/${subreddit}/comments/${postId}.json?limit=200&depth=10&raw_json=1`, signal);
+    const data = await fetchReddit(`https://www.reddit.com/r/${subreddit}/comments/${postId}.json?limit=200&depth=10&raw_json=1&include_over_18=on`, signal);
     if (data && data[1]?.data?.children) {
       return flattenComments(data[1].data.children);
     }
@@ -137,7 +137,7 @@ async function scrapeStandard({ subreddit, sorting, limit, onProgress, signal })
 
   while (unlimited || posts.length < limit) {
     const batch = unlimited ? 100 : Math.min(100, limit - posts.length);
-    const url = `https://www.reddit.com/r/${subreddit}/${sortPath}.json?limit=${batch}&raw_json=1${tParam}${after ? `&after=${after}` : ""}`;
+    const url = `https://www.reddit.com/r/${subreddit}/${sortPath}.json?limit=${batch}&raw_json=1&include_over_18=on${tParam}${after ? `&after=${after}` : ""}`;
     const data = await fetchReddit(url, signal);
     const children = data?.data?.children || [];
     if (children.length === 0) break;
@@ -172,7 +172,7 @@ async function scrapeSearch({ subreddit, query, sorting, timeFilter, limit, onPr
 
   while (unlimited || posts.length < limit) {
     const batch = unlimited ? 100 : Math.min(100, limit - posts.length);
-    const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(query)}&restrict_sr=on&sort=${sorting}&t=${timeFilter}&limit=${batch}&raw_json=1${after ? `&after=${after}` : ""}`;
+    const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(query)}&restrict_sr=on&sort=${sorting}&t=${timeFilter}&limit=${batch}&raw_json=1&include_over_18=on${after ? `&after=${after}` : ""}`;
     const data = await fetchReddit(url, signal);
     const children = data?.data?.children || [];
     if (children.length === 0) break;
