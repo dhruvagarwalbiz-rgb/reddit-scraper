@@ -109,7 +109,7 @@ function fileName(subreddit, mode, sorting, searchQuery) {
 
 // ── Reddit API helpers (uses public JSON endpoints) ──────────────
 async function fetchReddit(url, signal) {
-const res = await fetch(`/api/reddit?url=${encodeURIComponent(url)}`, { signal });
+  const res = await fetch("/api/reddit?url=" + encodeURIComponent(url), { signal });
   if (res.status === 429) throw new Error("Rate limited by Reddit. Please wait and try again.");
   if (!res.ok) throw new Error(`Reddit returned ${res.status}`);
   return res.json();
@@ -130,19 +130,20 @@ async function fetchPostComments(subreddit, postId, signal) {
 async function scrapeStandard({ subreddit, sorting, limit, onProgress, signal }) {
   const posts = [];
   let after = null;
+  const unlimited = limit === 0;
   const sortMap = { hot: "hot", new: "new", top_year: "top", top_all: "top", controversial: "controversial" };
   const sortPath = sortMap[sorting] || "hot";
   const tParam = sorting === "top_year" ? "&t=year" : sorting === "top_all" ? "&t=all" : sorting === "controversial" ? "&t=all" : "";
 
-  while (posts.length < limit) {
-    const batch = Math.min(100, limit - posts.length);
+  while (unlimited || posts.length < limit) {
+    const batch = unlimited ? 100 : Math.min(100, limit - posts.length);
     const url = `https://www.reddit.com/r/${subreddit}/${sortPath}.json?limit=${batch}&raw_json=1${tParam}${after ? `&after=${after}` : ""}`;
     const data = await fetchReddit(url, signal);
     const children = data?.data?.children || [];
     if (children.length === 0) break;
 
     for (const child of children) {
-      if (posts.length >= limit) break;
+      if (!unlimited && posts.length >= limit) break;
       const d = child.data;
       if (!d || d.is_video || d.is_gallery) continue;
       const comments = await fetchPostComments(subreddit, d.id, signal);
@@ -167,16 +168,17 @@ async function scrapeStandard({ subreddit, sorting, limit, onProgress, signal })
 async function scrapeSearch({ subreddit, query, sorting, timeFilter, limit, onProgress, signal }) {
   const posts = [];
   let after = null;
+  const unlimited = limit === 0;
 
-  while (posts.length < limit) {
-    const batch = Math.min(100, limit - posts.length);
+  while (unlimited || posts.length < limit) {
+    const batch = unlimited ? 100 : Math.min(100, limit - posts.length);
     const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(query)}&restrict_sr=on&sort=${sorting}&t=${timeFilter}&limit=${batch}&raw_json=1${after ? `&after=${after}` : ""}`;
     const data = await fetchReddit(url, signal);
     const children = data?.data?.children || [];
     if (children.length === 0) break;
 
     for (const child of children) {
-      if (posts.length >= limit) break;
+      if (!unlimited && posts.length >= limit) break;
       const d = child.data;
       if (!d) continue;
       const comments = await fetchPostComments(subreddit, d.id, signal);
@@ -296,7 +298,8 @@ export default function RedditScraper() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sorting, setSorting] = useState("hot");
   const [timeFilter, setTimeFilter] = useState("all");
-  const [postLimit, setPostLimit] = useState(25);
+  const [postLimit, setPostLimit] = useState(0);
+  const [isUnlimited, setIsUnlimited] = useState(true);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [logs, setLogs] = useState([]);
@@ -327,13 +330,13 @@ export default function RedditScraper() {
 
     addLog(`Starting ${mode} extraction for r/${subreddit}`, "info");
     if (mode === "search") addLog(`Search query: "${searchQuery}"`, "info");
-    addLog(`Sorting: ${SORT_LABELS[sorting]} | Limit: ${postLimit}`, "info");
+    addLog(`Sorting: ${SORT_LABELS[sorting]} | Limit: ${isUnlimited ? "Unlimited (all posts)" : postLimit}`, "info");
 
     try {
       let posts;
       const onProgress = (n) => {
         setProgress(n);
-        addLog(`Extracted post ${n}/${postLimit}`);
+        if (isUnlimited) { addLog(`Extracted post ${n}`); } else { addLog(`Extracted post ${n}/${postLimit}`); }
       };
 
       if (mode === "standard") {
@@ -445,17 +448,22 @@ export default function RedditScraper() {
           )}
 
           {/* Post Limit */}
-          <Field label={`Post Limit — ${postLimit}`}>
-            <input
-              type="range"
-              min={1}
-              max={500}
-              value={postLimit}
-              onChange={(e) => setPostLimit(Number(e.target.value))}
-              style={{ width: "100%", accentColor: "#FF4500" }}
-            />
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#555" }}>
-              <span>1</span><span>500</span>
+          <Field label="Post Limit">
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <Pill active={isUnlimited} onClick={() => { setIsUnlimited(true); setPostLimit(0); }}>Unlimited</Pill>
+              <Pill active={!isUnlimited} onClick={() => { setIsUnlimited(false); setPostLimit(25); }}>Custom</Pill>
+            </div>
+            {!isUnlimited && (
+              <Input
+                type="number"
+                min={1}
+                placeholder="Enter post limit..."
+                value={postLimit}
+                onChange={(e) => setPostLimit(Math.max(1, Number(e.target.value) || 1))}
+              />
+            )}
+            <div style={{ fontSize: 10, color: "#555", marginTop: 4 }}>
+              {isUnlimited ? "Will extract ALL available posts until Reddit runs out" : `Will extract up to ${postLimit} posts`}
             </div>
           </Field>
 
@@ -549,10 +557,18 @@ export default function RedditScraper() {
                 </>
               )}
               {running && !result && (
-                <div style={{ flex: 1 }}>
-                  <div style={{ height: 3, background: "#1a1a1a", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${(progress / postLimit) * 100}%`, background: "linear-gradient(90deg, #FF4500, #FF6B35)", borderRadius: 2, transition: "width .3s" }} />
-                  </div>
+                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
+                  {isUnlimited ? (
+                    <div style={{ fontSize: 12, color: "#FF4500" }}>
+                      Extracting all posts...
+                    </div>
+                  ) : (
+                    <div style={{ flex: 1 }}>
+                      <div style={{ height: 3, background: "#1a1a1a", borderRadius: 2, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${(progress / postLimit) * 100}%`, background: "linear-gradient(90deg, #FF4500, #FF6B35)", borderRadius: 2, transition: "width .3s" }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
