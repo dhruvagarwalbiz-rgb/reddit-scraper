@@ -109,7 +109,7 @@ function fileName(subreddit, mode, sorting, searchQuery) {
 
 // ── Reddit API helpers (uses public JSON endpoints) ──────────────
 async function fetchReddit(url, signal) {
-  const res = await fetch(url, { signal });
+  const res = await fetch(`/api/reddit?url=${encodeURIComponent(url)}`, { signal });
   if (res.status === 429) throw new Error("Rate limited by Reddit. Please wait and try again.");
   if (!res.ok) throw new Error(`Reddit returned ${res.status}`);
   return res.json();
