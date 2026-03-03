@@ -62,7 +62,7 @@ function buildOutputText(posts, subreddit, mode, searchQuery, sorting) {
     `REDDIT TEXT EXTRACTION`,
     `Generated: ${new Date().toISOString().split("T")[0]}`,
     `Subreddit: r/${subreddit}`,
-    `Mode: ${mode === "standard" ? "STANDARD" : mode === "max" ? "MAX EXTRACT" : "SEARCH"}`,
+    `Mode: ${mode === "standard" ? "STANDARD" : "SEARCH"}`,
     mode === "search" ? `Search Query: ${searchQuery}` : null,
     `Sorting: ${sorting}`,
     `Total Posts: ${posts.length}`,
@@ -75,7 +75,7 @@ function buildOutputText(posts, subreddit, mode, searchQuery, sorting) {
     return [
       "=".repeat(40),
       `SUBREDDIT: ${subreddit}`,
-      `MODE: ${mode === "standard" ? "STANDARD" : mode === "max" ? "MAX EXTRACT" : "SEARCH"}`,
+      `MODE: ${mode === "standard" ? "STANDARD" : "SEARCH"}`,
       mode === "search" ? `SEARCH QUERY: ${searchQuery}` : null,
       `POST #: ${i + 1}`,
       `POST ID: ${p.id}`,
@@ -100,9 +100,6 @@ function buildOutputText(posts, subreddit, mode, searchQuery, sorting) {
 
 function fileName(subreddit, mode, sorting, searchQuery) {
   const date = new Date().toISOString().split("T")[0];
-  if (mode === "max") {
-    return subreddit + "_max_extract_" + date + ".txt";
-  }
   if (mode === "search") {
     const kw = (searchQuery || "query").replace(/\s+/g, "_").toLowerCase().slice(0, 40);
     return `${subreddit}_search_${kw}_${date}.txt`;
@@ -203,61 +200,6 @@ async function scrapeSearch({ subreddit, query, sorting, timeFilter, limit, onPr
 }
 
 // ── Components ───────────────────────────────────────────────────
-
-async function scrapeMaxExtract({ subreddit, onProgress, onLog, signal }) {
-  const allPosts = new Map();
-  const sortConfigs = [
-    { sorting: "hot", sortPath: "hot", tParam: "", label: "Hot" },
-    { sorting: "new", sortPath: "new", tParam: "", label: "New" },
-    { sorting: "top_year", sortPath: "top", tParam: "&t=year", label: "Top (Year)" },
-    { sorting: "top_all", sortPath: "top", tParam: "&t=all", label: "Top (All Time)" },
-    { sorting: "controversial", sortPath: "controversial", tParam: "&t=all", label: "Controversial" },
-  ];
-
-  for (let si = 0; si < sortConfigs.length; si++) {
-    const cfg = sortConfigs[si];
-    onLog("Pass " + (si + 1) + "/5: Fetching " + cfg.label + " posts", "info");
-    let after = null;
-    let passCount = 0;
-
-    while (true) {
-      const url = "https://www.reddit.com/r/" + subreddit + "/" + cfg.sortPath + ".json?limit=100&raw_json=1&include_over_18=on" + cfg.tParam + (after ? "&after=" + after : "");
-      let data;
-      try {
-        data = await fetchReddit(url, signal);
-      } catch (e) {
-        if (e.name === "AbortError") throw e;
-        onLog("Warning: " + e.message + " - moving to next sort", "error");
-        break;
-      }
-      const children = (data && data.data && data.data.children) ? data.data.children : [];
-      if (children.length === 0) break;
-
-      for (let ci = 0; ci < children.length; ci++) {
-        const d = children[ci].data;
-        if (!d || d.is_video || d.is_gallery) continue;
-        if (allPosts.has(d.id)) continue;
-        const comments = await fetchPostComments(subreddit, d.id, signal);
-        allPosts.set(d.id, {
-          id: d.id,
-          title: cleanText(d.title),
-          body: cleanText(d.selftext),
-          score: d.score,
-          date: formatDate(d.created_utc),
-          comments: comments,
-        });
-        passCount++;
-        onProgress(allPosts.size);
-        await new Promise(function(r) { setTimeout(r, 350); });
-      }
-      after = (data && data.data) ? data.data.after : null;
-      if (!after) break;
-    }
-    onLog(cfg.label + " done: " + passCount + " new posts (Total unique: " + allPosts.size + ")", "success");
-  }
-  return Array.from(allPosts.values());
-}
-
 function Pill({ active, children, onClick }) {
   return (
     <button
@@ -367,7 +309,7 @@ export default function RedditScraper() {
 
   useEffect(() => {
     if (mode === "standard") setSorting("hot");
-    else if (mode === "search") setSorting("relevance");
+    else setSorting("relevance");
   }, [mode]);
 
   useEffect(() => {
@@ -394,12 +336,10 @@ export default function RedditScraper() {
       let posts;
       const onProgress = (n) => {
         setProgress(n);
-        if (mode === "max") { addLog("Unique posts: " + n); } else if (isUnlimited) { addLog("Extracted post " + n); } else { addLog("Extracted post " + n + "/" + postLimit); }
+        if (isUnlimited) { addLog(`Extracted post ${n}`); } else { addLog(`Extracted post ${n}/${postLimit}`); }
       };
 
-      if (mode === "max") {
-        posts = await scrapeMaxExtract({ subreddit: subreddit.trim(), onProgress: onProgress, onLog: addLog, signal: abortRef.current.signal });
-      } else if (mode === "standard") {
+      if (mode === "standard") {
         posts = await scrapeStandard({ subreddit: subreddit.trim(), sorting, limit: postLimit, onProgress, signal: abortRef.current.signal });
       } else {
         posts = await scrapeSearch({ subreddit: subreddit.trim(), query: searchQuery, sorting, timeFilter, limit: postLimit, onProgress, signal: abortRef.current.signal });
@@ -473,7 +413,6 @@ export default function RedditScraper() {
             <div style={{ display: "flex", gap: 8 }}>
               <Pill active={mode === "standard"} onClick={() => setMode("standard")}>Standard</Pill>
               <Pill active={mode === "search"} onClick={() => setMode("search")}>Search</Pill>
-              <Pill active={mode === "max"} onClick={() => setMode("max")}>Max Extract</Pill>
             </div>
           </Field>
 
@@ -493,13 +432,13 @@ export default function RedditScraper() {
           )}
 
           {/* Sorting */}
-          {mode !== "max" && <Field label="Sort By">
+          <Field label="Sort By">
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {sortOptions.map((s) => (
                 <Pill key={s} active={sorting === s} onClick={() => setSorting(s)}>{SORT_LABELS[s]}</Pill>
               ))}
             </div>
-          </Field>}
+          </Field>
 
           {/* Time Filter (search mode) */}
           {mode === "search" && (
@@ -526,16 +465,7 @@ export default function RedditScraper() {
             <div style={{ fontSize: 10, color: "#555", marginTop: 4 }}>
               {isUnlimited ? "Will extract ALL available posts until Reddit runs out" : `Will extract up to ${postLimit} posts`}
             </div>
-          </Field>}
-
-          {mode === "max" && (
-            <div style={{ background: "#1a1a0a", border: "1px solid #3a3a00", borderRadius: 8, padding: 14 }}>
-              <div style={{ fontSize: 12, color: "#FFD700", fontWeight: 600, marginBottom: 6 }}>MAX EXTRACT MODE</div>
-              <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>
-                Runs all 5 sort types (Hot, New, Top Year, Top All, Controversial) and merges results. Duplicates removed automatically. Gets 1500-2000+ unique posts.
-              </div>
-            </div>
-          )}
+          </Field>
 
           {/* Actions */}
           <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -628,9 +558,9 @@ export default function RedditScraper() {
               )}
               {running && !result && (
                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
-                  {(isUnlimited || mode === "max") ? (
-                    <div style={{ fontSize: 12, color: mode === "max" ? "#FFD700" : "#FF4500" }}>
-                      {mode === "max" ? "Max extracting across all sorts..." : "Extracting all posts..."
+                  {isUnlimited ? (
+                    <div style={{ fontSize: 12, color: "#FF4500" }}>
+                      Extracting all posts...
                     </div>
                   ) : (
                     <div style={{ flex: 1 }}>
