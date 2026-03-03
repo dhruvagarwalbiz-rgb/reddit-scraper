@@ -1,16 +1,18 @@
 export default async function handler(req, res) {
   const { url } = req.query;
 
-  if (!url || !url.startsWith("https://www.reddit.com/")) {
-    return res.status(400).json({ error: "Invalid URL" });
+  if (!url) {
+    return res.status(400).json({ error: "Missing url param" });
   }
 
+  // Switch to old.reddit.com which is less restrictive
+  const redditUrl = url.replace("https://www.reddit.com/", "https://old.reddit.com/");
+
   try {
-    const response = await fetch(url, {
+    const response = await fetch(redditUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "Accept": "text/html,application/xhtml+xml,application/json",
       },
     });
 
@@ -18,8 +20,14 @@ export default async function handler(req, res) {
       return res.status(response.status).json({ error: `Reddit returned ${response.status}` });
     }
 
-    const data = await response.json();
-    return res.status(200).json(data);
+    const text = await response.text();
+
+    try {
+      const data = JSON.parse(text);
+      return res.status(200).json(data);
+    } catch {
+      return res.status(500).json({ error: "Reddit did not return JSON" });
+    }
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
